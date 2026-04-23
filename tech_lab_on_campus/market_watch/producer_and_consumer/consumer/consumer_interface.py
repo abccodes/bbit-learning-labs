@@ -12,50 +12,63 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
+from abc import ABC, abstractmethod
 
-class mqConsumerInterface:
+import pika
+
+
+class mqConsumerInterface(ABC):
     def __init__(
         self, binding_key: str, exchange_name: str, queue_name: str
     ) -> None:
-        # Save parameters to class variables
+        self.binding_key = binding_key
+        self.exchange_name = exchange_name
+        self.queue_name = queue_name
+        self.connection = None
+        self.channel = None
 
-        # Call setupRMQConnection
-        pass
+        self.setupRMQConnection()
 
     def setupRMQConnection(self) -> None:
-        # Set-up Connection to RabbitMQ service
+        con_params = pika.URLParameters(os.environ["AMQP_URL"])
+        self.connection = pika.BlockingConnection(parameters=con_params)
+        self.channel = self.connection.channel()
 
-        # Establish Channel
+        self.channel.queue_declare(queue=self.queue_name, durable=True)
+        self.channel.exchange_declare(
+            exchange=self.exchange_name,
+            exchange_type="topic",
+            durable=True,
+        )
+        self.channel.queue_bind(
+            exchange=self.exchange_name,
+            queue=self.queue_name,
+            routing_key=self.binding_key,
+        )
+        self.channel.basic_consume(
+            queue=self.queue_name,
+            on_message_callback=self.on_message_callback,
+            auto_ack=False,
+        )
 
-        # Create Queue if not already present
-
-        # Create the exchange if not already present
-
-        # Bind Binding Key to Queue on the exchange
-
-        # Set-up Callback function for receiving messages
-        pass
-
+    @abstractmethod
     def on_message_callback(
         self, channel, method_frame, header_frame, body
     ) -> None:
-        # Acknowledge message
-
-        #Print message (The message is contained in the body parameter variable)
-
-        pass
+        """Handle a delivered RabbitMQ message."""
 
     def startConsuming(self) -> None:
-        # Print " [*] Waiting for messages. To exit press CTRL+C"
+        print(" [*] Waiting for messages. To exit press CTRL+C")
+        if self.channel is None:
+            raise RuntimeError("RabbitMQ channel has not been initialized")
+        self.channel.start_consuming()
 
-        # Start consuming messages
-        pass
-    
+    def close(self) -> None:
+        if self.channel is not None and self.channel.is_open:
+            self.channel.close()
+        if self.connection is not None and self.connection.is_open:
+            self.connection.close()
+
     def __del__(self) -> None:
-        # Print "Closing RMQ connection on destruction"
-        
-        # Close Channel
-
-        # Close Connection
-        
-        pass
+        self.close()
